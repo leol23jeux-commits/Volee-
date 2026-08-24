@@ -260,6 +260,7 @@ const CATEGORIES = [
   {id:'physique', label:'Physique'},
   {id:'mental', label:'Mental'},
 ];
+const NIVEAUX = ['NC', 'P3', 'P2', 'P1', 'D9', 'D8', 'D7', 'R6', 'R5', 'R4', 'N3', 'N2', 'N1'];
 const OBJECTIVES = [
   {id:'tous', label:'Tous objectifs'},
   {id:'smash', label:'Progresser au smash'},
@@ -507,7 +508,7 @@ function partnerCard(p){
     <div style="display:flex;align-items:center;gap:12px;">
       <div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--coral),var(--c-technique));display:flex;align-items:center;justify-content:center;font-family:'Anton',sans-serif;font-size:18px;color:#1a1400;flex-shrink:0;">${initial}</div>
       <div>
-        <h3 style="margin-bottom:2px;">${p.pseudo}</h3>
+        <h3 style="margin-bottom:2px;">${p.pseudo}${p.niveau ? ` <span class="tag obj" style="vertical-align:middle;">${p.niveau}</span>` : ''}</h3>
         <p style="margin:0;font-size:13px;">${p.ville ? '📍 '+p.ville : 'Ville non renseignée'}${p.dispo ? ' · '+p.dispo : ''}</p>
       </div>
     </div>
@@ -563,6 +564,12 @@ function renderProfil(){
         <div id="profileMsg"></div>
         <div class="field"><label>Pseudo</label><input id="pPseudo" type="text" value="${p.pseudo||''}" placeholder="Ton pseudo sur les terrains"></div>
         <div class="field"><label>Ville</label><input id="pVille" type="text" value="${p.ville||''}" placeholder="Ta ville"></div>
+        <div class="field"><label>Niveau (FFBaD, optionnel)</label>
+          <select id="pNiveau">
+            <option value="">Non renseigné</option>
+            ${NIVEAUX.map(n=>`<option value="${n}" ${p.niveau===n?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
         <div class="field"><label>Disponibilités</label><input id="pDispo" type="text" value="${p.dispo||''}" placeholder="Ex: mardi soir, week-end"></div>
         <button class="btn block" id="saveProfil">Enregistrer</button>
       </div>
@@ -575,8 +582,9 @@ function renderProfil(){
     const pseudo = box.querySelector('#pPseudo').value.trim();
     const ville = box.querySelector('#pVille').value.trim();
     const dispo = box.querySelector('#pDispo').value.trim();
+    const niveau = box.querySelector('#pNiveau').value;
     const { error } = await sb.from('profiles').upsert({
-      id: state.session.user.id, pseudo, ville, dispo, updated_at: new Date().toISOString()
+      id: state.session.user.id, pseudo, ville, dispo, niveau, updated_at: new Date().toISOString()
     });
     const msgBox = box.querySelector('#profileMsg');
     if(error){
