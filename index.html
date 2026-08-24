@@ -181,9 +181,25 @@
   footer{padding:30px 20px;text-align:center;font-size:12px;color:var(--cream-dim);border-top:1px solid var(--line);}
 
   .hidden{display:none !important;}
+  .mobile-only{display:none;}
+  .mobile-menu{
+    position:fixed;top:64px;right:16px;z-index:60;
+    background:#132C2C;border:1px solid var(--line);border-radius:14px;
+    display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+    min-width:180px;
+  }
+  .mobile-menu button{
+    background:none;border:none;color:var(--cream);text-align:left;
+    padding:14px 18px;font-size:15px;font-weight:600;cursor:pointer;
+    border-bottom:1px solid var(--line);
+  }
+  .mobile-menu button:last-child{border-bottom:none;}
+  .mobile-menu button.active{color:var(--coral);}
   @media(max-width:520px){
     nav.tabs{display:none;}
-    header.topbar{padding:14px 16px;}
+    .mobile-only{display:flex;}
+    header.topbar{padding:14px 16px;gap:8px;}
   }
 </style>
 </head>
@@ -200,7 +216,15 @@
       <button data-view="profil" id="tabProfil">Profil</button>
     </nav>
     <div id="authBtnWrap"><button class="icon-btn" id="authIconBtn" title="Compte">＋</button></div>
+    <button class="icon-btn mobile-only" id="menuBtn" title="Menu">☰</button>
   </header>
+
+  <div id="mobileMenu" class="mobile-menu hidden">
+    <button data-view="home">Accueil</button>
+    <button data-view="conseils">Conseils</button>
+    <button data-view="partenaires">Partenaires</button>
+    <button data-view="profil" id="mobileTabProfil">Profil</button>
+  </div>
 
   <main id="main"></main>
 
@@ -610,7 +634,11 @@ function updateTabs(){
   document.querySelectorAll('#mainTabs button').forEach(b=>{
     b.classList.toggle('active', b.dataset.view===currentRoute());
   });
+  document.querySelectorAll('#mobileMenu button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.view===currentRoute());
+  });
   document.getElementById('tabProfil').textContent = state.session ? 'Profil' : 'Connexion';
+  document.getElementById('mobileTabProfil').textContent = state.session ? 'Profil' : 'Connexion';
   document.getElementById('authIconBtn').style.display = state.session ? 'none' : 'flex';
   const backBtn = document.getElementById('backBtn');
   backBtn.classList.toggle('hidden', currentRoute()==='home');
@@ -667,6 +695,20 @@ async function render(){
 document.querySelectorAll('#mainTabs button').forEach(b=>{
   b.onclick = ()=>{ location.hash = '#/' + b.dataset.view; };
 });
+document.querySelectorAll('#mobileMenu button').forEach(b=>{
+  b.onclick = ()=>{ location.hash = '#/' + b.dataset.view; closeMobileMenu(); };
+});
+document.getElementById('menuBtn').onclick = (e)=>{
+  e.stopPropagation();
+  document.getElementById('mobileMenu').classList.toggle('hidden');
+};
+document.addEventListener('click', (e)=>{
+  const menu = document.getElementById('mobileMenu');
+  if(!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target.id!=='menuBtn'){
+    closeMobileMenu();
+  }
+});
+function closeMobileMenu(){ document.getElementById('mobileMenu').classList.add('hidden'); }
 document.getElementById('authIconBtn').onclick = ()=>{ location.hash = '#/auth'; };
 document.getElementById('backBtn').onclick = ()=>{ location.hash = '#/home'; };
 
