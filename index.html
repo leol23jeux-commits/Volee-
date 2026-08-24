@@ -213,6 +213,7 @@
       <button data-view="home">Accueil</button>
       <button data-view="conseils">Conseils</button>
       <button data-view="partenaires">Partenaires</button>
+      <button data-view="journal">Journal</button>
       <button data-view="profil" id="tabProfil">Profil</button>
     </nav>
     <div id="authBtnWrap"><button class="icon-btn" id="authIconBtn" title="Compte">＋</button></div>
@@ -223,6 +224,7 @@
     <button data-view="home">Accueil</button>
     <button data-view="conseils">Conseils</button>
     <button data-view="partenaires">Partenaires</button>
+    <button data-view="journal">Journal</button>
     <button data-view="profil" id="mobileTabProfil">Profil</button>
   </div>
 
@@ -251,6 +253,7 @@ let state = {
   searchQuery: '',
   favorites: [],
   showFavOnly: false,
+  sessions: [],
 };
 
 const CATEGORIES = [
@@ -303,7 +306,7 @@ async function initAuth(){
   if(session) await loadProfile();
   sb.auth.onAuthStateChange(async (_event, session)=>{
     state.session = session;
-    if(session){ await loadProfile(); await loadPartners(); await loadFavorites(); } else { state.profile = null; state.partners = []; state.favorites = []; }
+    if(session){ await loadProfile(); await loadPartners(); await loadFavorites(); await loadSessions(); } else { state.profile = null; state.partners = []; state.favorites = []; state.sessions = []; }
     render();
   });
 }
@@ -353,6 +356,25 @@ async function toggleFavorite(tipId){
     await sb.from('favorites').insert({ user_id: state.session.user.id, tip_id: tipId });
     state.favorites.push(tipId);
   }
+  render();
+}
+
+async function loadSessions(){
+  if(!state.session){ state.sessions = []; return; }
+  const { data, error } = await sb.from('sessions').select('*').eq('user_id', state.session.user.id).order('date', {ascending:false});
+  if(!error) state.sessions = data || [];
+}
+
+async function addSession(date, note){
+  if(!state.session || !note.trim()) return;
+  const { error } = await sb.from('sessions').insert({ user_id: state.session.user.id, date, note: note.trim() });
+  if(!error) await loadSessions();
+  return error;
+}
+
+async function deleteSession(id){
+  await sb.from('sessions').delete().eq('id', id).eq('user_id', state.session.user.id);
+  state.sessions = state.sessions.filter(s=>s.id!==id);
   render();
 }
 
@@ -552,6 +574,60 @@ function renderPartnersList(box){
   }
 }
 
+function renderJournal(){
+  if(!state.session){
+    const box = el(`<div></div>`);
+    box.appendChild(el(`<section class="section" style="border-top:none;padding-top:32px;"><div class="empty">Connecte-toi pour tenir ton journal d'entraînement.</div></section>`));
+    box.appendChild(renderAuth());
+    return box;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  const box = el(`
+    <section class="section" style="border-top:none;padding-top:32px;">
+      <div class="section-head"><h2>Journal d'entraînement</h2><span class="count mono">${state.sessions.length} séance(s)</span></div>
+      <div class="auth-card" style="margin:0 0 24px;">
+        <div id="sessionMsg"></div>
+        <div class="field"><label>Date</label><input id="sDate" type="date" value="${today}"></div>
+        <div class="field"><label>Ce que tu as travaillé</label><textarea id="sNote" rows="3" placeholder="Ex: smash, jeu de jambes, 1h de match..."></textarea></div>
+        <button class="btn block" id="addSession">Ajouter</button>
+      </div>
+      <div id="sessionsList"></div>
+    </section>
+  `);
+  box.querySelector('#addSession').onclick = async ()=>{
+    const date = box.querySelector('#sDate').value;
+    const note = box.querySelector('#sNote').value;
+    const msgBox = box.querySelector('#sessionMsg');
+    if(!note.trim()){ msgBox.innerHTML = `<div class="msg err">Décris un peu ta séance.</div>`; return; }
+    const error = await addSession(date, note);
+    if(error){ msgBox.innerHTML = `<div class="msg err">${error.message}</div>`; return; }
+    render();
+    location.hash = '#/journal';
+  };
+  const list = box.querySelector('#sessionsList');
+  if(state.sessions.length===0){
+    list.appendChild(el(`<div class="empty">Aucune séance enregistrée pour l'instant. Ajoute la première !</div>`));
+  } else {
+    state.sessions.forEach(s=>{
+      const d = new Date(s.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+      list.appendChild(el(`
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <span class="tag obj" style="text-transform:capitalize;">${d}</span>
+            <button class="del-session" data-id="${s.id}" style="background:none;border:none;color:var(--cream-dim);cursor:pointer;font-size:14px;padding:0;">✕</button>
+          </div>
+          <p style="margin-top:10px;">${s.note}</p>
+        </div>
+      `));
+    });
+    list.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.del-session');
+      if(btn) deleteSession(Number(btn.dataset.id));
+    });
+  }
+  return box;
+}
+
 function renderProfil(){
   if(!state.session){
     return renderAuth();
@@ -662,6 +738,7 @@ async function render(){
   let view;
   if(route==='conseils') view = renderConseils();
   else if(route==='partenaires') view = renderPartenaires();
+  else if(route==='journal') view = renderJournal();
   else if(route==='profil') view = renderProfil();
   else if(route==='auth') view = renderAuth();
   else if(route==='apropos') view = renderApropos();
@@ -724,7 +801,7 @@ document.getElementById('backBtn').onclick = ()=>{ location.hash = '#/home'; };
 (async function boot(){
   await initAuth();
   await loadTips();
-  if(state.session){ await loadPartners(); await loadFavorites(); }
+  if(state.session){ await loadPartners(); await loadFavorites(); await loadSessions(); }
   render();
 })();
 </script>
