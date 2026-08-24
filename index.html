@@ -191,10 +191,12 @@
 
 <div id="app">
   <header class="topbar">
-    <div class="logo"><span class="dot"></span>Volée</div>
+    <button class="icon-btn hidden" id="backBtn" title="Retour" style="margin-right:4px;">←</button>
+    <div class="logo" style="flex:1;"><span class="dot"></span>Volée</div>
     <nav class="tabs" id="mainTabs">
       <button data-view="home">Accueil</button>
       <button data-view="conseils">Conseils</button>
+      <button data-view="partenaires">Partenaires</button>
       <button data-view="profil" id="tabProfil">Profil</button>
     </nav>
     <div id="authBtnWrap"><button class="icon-btn" id="authIconBtn" title="Compte">＋</button></div>
@@ -202,7 +204,9 @@
 
   <main id="main"></main>
 
-  <footer>Volée — construit par un badiste, pour les badistes.</footer>
+  <footer>Volée — construit par un badiste, pour les badistes.<br>
+    <a href="#/apropos" style="color:var(--c-technique);text-decoration:none;font-size:12px;">Comment utiliser le site →</a>
+  </footer>
 </div>
 
 <script>
@@ -216,8 +220,13 @@ let state = {
   session: null,
   profile: null,
   tips: [],
+  partners: [],
+  partnerVilleFilter: '',
   activeCat: 'toutes',
   activeObj: 'tous',
+  searchQuery: '',
+  favorites: [],
+  showFavOnly: false,
 };
 
 const CATEGORIES = [
@@ -237,6 +246,26 @@ const OBJECTIVES = [
 ];
 
 /* ====================== ROUTER ====================== */
+function renderApropos(){
+  return el(`
+    <section class="section" style="border-top:none;padding-top:32px;">
+      <div class="section-head"><h2>Comment ça marche</h2></div>
+      <div class="card">
+        <h3>🎯 Conseils</h3>
+        <p>Filtre par catégorie (muscu, technique, physique, mental) et par objectif (smash, endurance, éviter les blessures...). Utilise la recherche pour trouver un mot-clé précis.</p>
+      </div>
+      <div class="card">
+        <h3>★ Favoris</h3>
+        <p>Connecte-toi puis appuie sur l'étoile d'un conseil pour le garder de côté. Retrouve-les via le filtre "Voir seulement mes favoris" sur la page Conseils.</p>
+      </div>
+      <div class="card">
+        <h3>🤝 Partenaires</h3>
+        <p>Remplis ton profil (ville, disponibilités) pour apparaître dans la liste, et retrouve d'autres joueurs près de chez toi.</p>
+      </div>
+    </section>
+  `);
+}
+
 function currentRoute(){
   return (location.hash || '#/').replace('#/','') || 'home';
 }
@@ -249,7 +278,7 @@ async function initAuth(){
   if(session) await loadProfile();
   sb.auth.onAuthStateChange(async (_event, session)=>{
     state.session = session;
-    if(session){ await loadProfile(); } else { state.profile = null; }
+    if(session){ await loadProfile(); await loadPartners(); await loadFavorites(); } else { state.profile = null; state.partners = []; state.favorites = []; }
     render();
   });
 }
@@ -277,11 +306,39 @@ async function loadTips(){
   if(!error) state.tips = data || [];
 }
 
+async function loadPartners(){
+  if(!state.session) return;
+  const { data, error } = await sb.from('profiles').select('*').not('pseudo','is',null).neq('pseudo','');
+  if(!error) state.partners = data || [];
+}
+
+async function loadFavorites(){
+  if(!state.session){ state.favorites = []; return; }
+  const { data, error } = await sb.from('favorites').select('tip_id').eq('user_id', state.session.user.id);
+  if(!error) state.favorites = (data||[]).map(f=>f.tip_id);
+}
+
+async function toggleFavorite(tipId){
+  if(!state.session) return;
+  const isFav = state.favorites.includes(tipId);
+  if(isFav){
+    await sb.from('favorites').delete().eq('user_id', state.session.user.id).eq('tip_id', tipId);
+    state.favorites = state.favorites.filter(id=>id!==tipId);
+  } else {
+    await sb.from('favorites').insert({ user_id: state.session.user.id, tip_id: tipId });
+    state.favorites.push(tipId);
+  }
+  render();
+}
+
 function filteredTips(){
+  const q = state.searchQuery.trim().toLowerCase();
   return state.tips.filter(t=>{
     const catOk = state.activeCat==='toutes' || t.category===state.activeCat;
     const objOk = state.activeObj==='tous' || t.objective===state.activeObj;
-    return catOk && objOk;
+    const searchOk = !q || t.title.toLowerCase().includes(q) || t.content.toLowerCase().includes(q);
+    const favOk = !state.showFavOnly || state.favorites.includes(t.id);
+    return catOk && objOk && searchOk && favOk;
   });
 }
 
@@ -293,6 +350,9 @@ function objLabel(id){ return (OBJECTIVES.find(o=>o.id===id)||{}).label || id; }
 function catColor(id){
   return {muscu:'var(--c-muscu)', technique:'var(--c-technique)', physique:'var(--c-physique)', mental:'var(--c-mental)'}[id] || 'var(--coral)';
 }
+function catIcon(id){
+  return {muscu:'💪', technique:'🎯', physique:'⚡', mental:'🧠'}[id] || '●';
+}
 
 function arcSVG(){
   return `<div class="arc-wrap"><svg class="arc" viewBox="0 0 400 60" preserveAspectRatio="none">
@@ -300,6 +360,12 @@ function arcSVG(){
     <circle class="arc-dot" cx="0" cy="50" r="3"></circle>
     <circle class="arc-dot" cx="400" cy="50" r="3"></circle>
   </svg></div>`;
+}
+
+function tipOfTheDay(){
+  if(state.tips.length===0) return null;
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(),0,0)) / 86400000);
+  return state.tips[dayOfYear % state.tips.length];
 }
 
 function renderHome(){
@@ -321,6 +387,15 @@ function renderHome(){
     </section>
   `));
   box.appendChild(el(arcSVG()));
+  const totd = tipOfTheDay();
+  if(totd){
+    box.appendChild(el(`
+      <section class="section" style="border-top:none;">
+        <div class="section-head"><h2>Conseil du jour</h2><span class="count mono">✦</span></div>
+        <div id="totdSlot"></div>
+      </section>
+    `));
+  }
   box.appendChild(el(`
     <section class="section">
       <div class="section-head"><h2>Derniers conseils</h2><span class="count mono">aperçu</span></div>
@@ -331,10 +406,14 @@ function renderHome(){
 }
 
 function tipCard(t){
+  const fav = state.favorites.includes(t.id);
   return `<div class="card" style="--cat-color:${catColor(t.category)};">
-    <div class="tag-row">
-      <span class="tag cat">${catLabel(t.category)}</span>
-      <span class="tag obj">${objLabel(t.objective)}</span>
+    <div class="tag-row" style="justify-content:space-between;align-items:center;">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span class="tag cat" style="--cat-color:${catColor(t.category)};">${catIcon(t.category)} ${catLabel(t.category)}</span>
+        <span class="tag obj">${objLabel(t.objective)}</span>
+      </div>
+      ${state.session ? `<button class="fav-btn" data-tip="${t.id}" style="background:none;border:none;font-size:18px;cursor:pointer;color:${fav?'var(--coral)':'var(--cream-dim)'};padding:0;">${fav?'★':'☆'}</button>` : ''}
     </div>
     <h3>${t.title}</h3>
     <p>${t.content}</p>
@@ -348,6 +427,9 @@ function renderConseils(){
         <h2>Conseils d'entraînement</h2>
         <span class="count mono">${filteredTips().length} résultat(s)</span>
       </div>
+      <div class="field" style="margin-bottom:16px;">
+        <input id="searchInput" type="text" placeholder="Rechercher un conseil..." value="${state.searchQuery}">
+      </div>
       <div class="filter-group">
         <span class="fg-label">Catégorie</span>
         <div class="filters" id="catFilters"></div>
@@ -356,9 +438,19 @@ function renderConseils(){
         <span class="fg-label">Objectif</span>
         <div class="filters" id="objFilters"></div>
       </div>
+      ${state.session ? `<div class="filter-group">
+        <span class="fg-label">Favoris</span>
+        <div class="filters">
+          <button class="chip ${state.showFavOnly?'active':''}" id="favToggle">★ Voir seulement mes favoris</button>
+        </div>
+      </div>` : ''}
       <div id="tipsList"></div>
     </section>
   `);
+  box.querySelector('#searchInput').oninput = (e)=>{ state.searchQuery = e.target.value; render(); };
+  if(state.session){
+    box.querySelector('#favToggle').onclick = ()=>{ state.showFavOnly = !state.showFavOnly; render(); };
+  }
   const catWrap = box.querySelector('#catFilters');
   CATEGORIES.forEach(c=>{
     const chip = el(`<button class="chip ${state.activeCat===c.id?'active':''}" data-cat="${c.id}">${c.label}</button>`);
@@ -378,7 +470,61 @@ function renderConseils(){
   } else {
     tips.forEach(t=> list.appendChild(el(tipCard(t))));
   }
+  list.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.fav-btn');
+    if(btn){ toggleFavorite(Number(btn.dataset.tip)); }
+  });
   return box;
+}
+
+function partnerCard(p){
+  const initial = (p.pseudo||'?').charAt(0).toUpperCase();
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--coral),var(--c-technique));display:flex;align-items:center;justify-content:center;font-family:'Anton',sans-serif;font-size:18px;color:#1a1400;flex-shrink:0;">${initial}</div>
+      <div>
+        <h3 style="margin-bottom:2px;">${p.pseudo}</h3>
+        <p style="margin:0;font-size:13px;">${p.ville ? '📍 '+p.ville : 'Ville non renseignée'}${p.dispo ? ' · '+p.dispo : ''}</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPartenaires(){
+  if(!state.session){
+    const box = el(`<div></div>`);
+    box.appendChild(el(`<section class="section" style="border-top:none;padding-top:32px;"><div class="empty">Connecte-toi pour voir les autres joueurs et trouver un partenaire.</div></section>`));
+    box.appendChild(renderAuth());
+    return box;
+  }
+  const box = el(`
+    <section class="section" style="border-top:none;padding-top:32px;">
+      <div class="section-head"><h2>Partenaires</h2><span class="count mono" id="partnerCount"></span></div>
+      <div class="field" style="max-width:340px;">
+        <label>Filtrer par ville</label>
+        <input id="villeFilter" type="text" placeholder="Ex: Lyon" value="${state.partnerVilleFilter}">
+      </div>
+      <div id="partnersList" style="margin-top:20px;"></div>
+    </section>
+  `);
+  const input = box.querySelector('#villeFilter');
+  input.oninput = ()=>{ state.partnerVilleFilter = input.value; renderPartnersList(box); };
+  renderPartnersList(box);
+  return box;
+}
+
+function renderPartnersList(box){
+  const list = box.querySelector('#partnersList');
+  const filter = state.partnerVilleFilter.trim().toLowerCase();
+  const others = state.partners.filter(p => p.id !== (state.session && state.session.user.id));
+  const filtered = filter ? others.filter(p => (p.ville||'').toLowerCase().includes(filter)) : others;
+  box.querySelector('#partnerCount').textContent = filtered.length + ' joueur(s)';
+  list.innerHTML = '';
+  if(filtered.length===0){
+    list.appendChild(el(`<div class="empty">Aucun joueur trouvé${filter ? ' pour cette ville' : ''}. Les autres badistes apparaîtront ici une fois inscrits avec leur profil rempli.</div>`));
+  } else {
+    filtered.forEach(p => list.appendChild(el(partnerCard(p))));
+  }
 }
 
 function renderProfil(){
@@ -466,21 +612,41 @@ function updateTabs(){
   });
   document.getElementById('tabProfil').textContent = state.session ? 'Profil' : 'Connexion';
   document.getElementById('authIconBtn').style.display = state.session ? 'none' : 'flex';
+  const backBtn = document.getElementById('backBtn');
+  backBtn.classList.toggle('hidden', currentRoute()==='home');
 }
 
 async function render(){
   const main = document.getElementById('main');
+  const prevSearchFocused = document.activeElement && document.activeElement.id==='searchInput';
+  const prevCursor = prevSearchFocused ? document.activeElement.selectionStart : null;
   main.innerHTML = '';
   const route = currentRoute();
   updateTabs();
   let view;
   if(route==='conseils') view = renderConseils();
+  else if(route==='partenaires') view = renderPartenaires();
   else if(route==='profil') view = renderProfil();
   else if(route==='auth') view = renderAuth();
+  else if(route==='apropos') view = renderApropos();
   else view = renderHome();
   main.appendChild(view);
 
+  if(prevSearchFocused){
+    const si = document.getElementById('searchInput');
+    if(si){ si.focus(); si.setSelectionRange(prevCursor, prevCursor); }
+  }
+
   if(route==='home'){
+    const totdSlot = document.getElementById('totdSlot');
+    if(totdSlot){
+      const totd = tipOfTheDay();
+      if(totd) totdSlot.appendChild(el(tipCard(totd)));
+      totdSlot.addEventListener('click', (e)=>{
+        const btn = e.target.closest('.fav-btn');
+        if(btn){ toggleFavorite(Number(btn.dataset.tip)); }
+      });
+    }
     const preview = document.getElementById('homePreview');
     if(preview){
       const recent = state.tips.slice(0,3);
@@ -502,11 +668,13 @@ document.querySelectorAll('#mainTabs button').forEach(b=>{
   b.onclick = ()=>{ location.hash = '#/' + b.dataset.view; };
 });
 document.getElementById('authIconBtn').onclick = ()=>{ location.hash = '#/auth'; };
+document.getElementById('backBtn').onclick = ()=>{ location.hash = '#/home'; };
 
 /* ====================== BOOT ====================== */
 (async function boot(){
   await initAuth();
   await loadTips();
+  if(state.session){ await loadPartners(); await loadFavorites(); }
   render();
 })();
 </script>
